@@ -24,7 +24,10 @@ DEV = "shezin boy"
 PRODUCT = "sz dev studio"
 WHATSAPP = "01889221262"
 TG_BOT_TOKEN = "8653938577:AAE1g-TDAedxbpGvszb0zRyVa04560mba0c"
-PASTEBIN_URL = "https://pastebin.com/raw/zuc5FE16"
+
+# [এখানে আপনার গিটহাব জিস্ট এর RAW লিংকটি বসাবেন]
+LICENSE_URL = "https://github.com/lizanislamlemon-dev/kx-yt-hub/raw/refs/heads/main/LICENSE" 
+
 SCOPES = ['https://www.googleapis.com/auth/youtube']
 CONFIG_FILE = 'config.json'
 
@@ -108,7 +111,7 @@ def auth_youtube():
 # ==========================================
 def check_license(user_key):
     try:
-        req = requests.get(PASTEBIN_URL).text
+        req = requests.get(LICENSE_URL).text
         for line in req.split('\n'):
             line = line.strip()
             if line.startswith(f"L={user_key},EXP="):
