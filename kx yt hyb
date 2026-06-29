@@ -92,7 +92,11 @@ def auth_youtube():
                 print(Fore.RED + "  [X] Error: 'client_secret.json' file is missing!")
                 sys.exit()
             flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+            
+            # FIX: open_browser=False prevents termux from crashing
+            print(Fore.YELLOW + "\n  [!] Please click the long link below to login (or copy and paste it into Chrome):\n")
+            creds = flow.run_local_server(port=0, open_browser=False)
+            
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
             
@@ -138,13 +142,13 @@ def first_time_setup():
 
     print(Fore.MAGENTA + "  " + "-"*44)
     print(Fore.YELLOW + "   [ YOUTUBE CHANNEL SETUP ]")
-    print(Fore.WHITE + "   Browser will open now. Please Login with")
-    print(Fore.WHITE + "   your YouTube Gmail and click 'Allow'.")
+    print(Fore.WHITE + "   A link will be generated now. Click on it")
+    print(Fore.WHITE + "   to login with your YouTube Gmail Account.")
     print(Fore.MAGENTA + "  " + "-"*44)
-    input(Fore.CYAN + "  [>] Press Enter to Login to YouTube...")
-    loading_bar("Authenticating YouTube API")
+    input(Fore.CYAN + "  [>] Press Enter to generate YouTube link...")
+    
     youtube, ch_name, ch_subs = auth_youtube()
-    print(Fore.GREEN + f"  [✔] YouTube Connected: {ch_name}\n")
+    print(Fore.GREEN + f"\n  [✔] YouTube Connected: {ch_name}\n")
     time.sleep(1)
 
     banner()
