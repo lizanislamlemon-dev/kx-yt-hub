@@ -1,0 +1,288 @@
+#!/usr/bin/env python
+import os
+import sys
+import time
+import json
+import requests
+from datetime import datetime
+import yt_dlp
+import google.generativeai as genai
+from colorama import Fore, Back, Style, init
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
+init(autoreset=True)
+
+# ==========================================
+# DEVELOPER CONFIGURATION
+# ==========================================
+TOOL_NAME = "KX YT HUB (PRO)"
+DEV = "shezin boy"
+PRODUCT = "sz dev studio"
+WHATSAPP = "01889221262"
+TG_BOT_TOKEN = "8653938577:AAE1g-TDAedxbpGvszb0zRyVa04560mba0c"
+PASTEBIN_URL = "https://pastebin.com/raw/zuc5FE16"
+SCOPES = ['https://www.googleapis.com/auth/youtube']
+CONFIG_FILE = 'config.json'
+
+try:
+    bot_info = requests.get(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getMe").json()
+    BOT_USERNAME = bot_info.get('result', {}).get('username', 'UnknownBot')
+except:
+    BOT_USERNAME = "UnknownBot"
+
+# ==========================================
+# PREMIUM UI & ANIMATIONS
+# ==========================================
+def clear():
+    os.system('clear' if os.name == 'posix' else 'cls')
+
+def loading_bar(text):
+    print(Fore.CYAN + f"\n  [~] {text}...")
+    for i in range(101):
+        sys.stdout.write(f"\r  " + Fore.YELLOW + f"[>] Progress: [{i}%] " + Fore.GREEN + ("█" * (i // 5)) + Fore.WHITE + ("░" * (20 - (i // 5))))
+        sys.stdout.flush()
+        time.sleep(0.01)
+    print(Fore.GREEN + "\n  [✔] Complete!\n")
+    time.sleep(0.3)
+
+def banner():
+    clear()
+    print(Fore.MAGENTA + " ╔════════════════════════════════════════════════╗")
+    print(Fore.CYAN + Style.BRIGHT + """
+      _  ____  __ __     __ _______   _    _  _    _  ____  
+     | |/ /\ \/ / \ \   / /|__   __| | |  | || |  | ||  _ \ 
+     | ' /  \  /   \ \_/ /    | |    | |__| || |  | || |_) |
+     |  <    /  \     \   /     | |    |  __  || |  | ||  _ < 
+     | . \  / /\ \     | |      | |    | |  | || |__| || |_) |
+     |_|\_\/_/  \_\    |_|      |_|    |_|  |_| \____/ |____/ 
+    """)
+    print(Fore.MAGENTA + " ╠════════════════════════════════════════════════╣")
+    print(Fore.YELLOW + f" ║ {Fore.WHITE}Tool    : {Fore.GREEN}{TOOL_NAME:<31} {Fore.YELLOW}║")
+    print(Fore.YELLOW + f" ║ {Fore.WHITE}Dev     : {Fore.GREEN}{DEV:<31} {Fore.YELLOW}║")
+    print(Fore.YELLOW + f" ║ {Fore.WHITE}Support : {Fore.GREEN}{WHATSAPP:<31} {Fore.YELLOW}║")
+    print(Fore.MAGENTA + " ╚════════════════════════════════════════════════╝\n")
+
+# ==========================================
+# TELEGRAM SYSTEM
+# ==========================================
+def send_tg(chat_id, text):
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": f"🚀 *KX YT HUB*\n\n{text}", "parse_mode": "Markdown"}
+    try:
+        requests.post(url, json=payload)
+    except:
+        pass
+
+# ==========================================
+# YOUTUBE AUTHENTICATION
+# ==========================================
+def auth_youtube():
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not os.path.exists('client_secret.json'):
+                print(Fore.RED + "  [X] Error: 'client_secret.json' file is missing!")
+                sys.exit()
+            flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+            
+    youtube = build('youtube', 'v3', credentials=creds)
+    req = youtube.channels().list(part="snippet,statistics", mine=True)
+    res = req.execute()
+    ch_name = res['items'][0]['snippet']['title']
+    ch_subs = res['items'][0]['statistics']['subscriberCount']
+    return youtube, ch_name, ch_subs
+
+# ==========================================
+# SETUP & CONFIGURATION
+# ==========================================
+def check_license(user_key):
+    try:
+        req = requests.get(PASTEBIN_URL).text
+        for line in req.split('\n'):
+            line = line.strip()
+            if line.startswith(f"L={user_key},EXP="):
+                exp_date_str = line.split("EXP=")[1].strip()
+                exp_date = datetime.strptime(exp_date_str, "%d-%m-%Y")
+                if datetime.now() > exp_date:
+                    return False, "EXPIRED", exp_date_str
+                return True, "ACTIVE", exp_date_str
+        return False, "INVALID", None
+    except:
+        print(Fore.RED + "  [-] Internet Connection Error!")
+        sys.exit()
+
+def first_time_setup():
+    banner()
+    print(Fore.CYAN + Back.BLUE + "   [ WELCOME TO KX YT HUB SETUP ]   " + Style.RESET_ALL + "\n")
+    
+    # 1. License Setup
+    user_key = input(Fore.CYAN + "  [?] Enter Your License Key : " + Fore.WHITE).strip()
+    loading_bar("Verifying License Server")
+    is_valid, status, exp_date = check_license(user_key)
+    
+    if not is_valid:
+        print(Fore.RED + Style.BRIGHT + f"  [X] ERROR: License {status}!")
+        sys.exit()
+    print(Fore.GREEN + f"  [✔] License Valid Till: {exp_date}\n")
+    time.sleep(1)
+
+    # 2. YouTube Setup
+    print(Fore.MAGENTA + "  " + "-"*44)
+    print(Fore.YELLOW + "   [ YOUTUBE CHANNEL SETUP ]")
+    print(Fore.WHITE + "   Browser will open now. Please Login with")
+    print(Fore.WHITE + "   your YouTube Gmail and click 'Allow'.")
+    print(Fore.MAGENTA + "  " + "-"*44)
+    input(Fore.CYAN + "  [>] Press Enter to Login to YouTube...")
+    loading_bar("Authenticating YouTube API")
+    youtube, ch_name, ch_subs = auth_youtube()
+    print(Fore.GREEN + f"  [✔] YouTube Connected: {ch_name}\n")
+    time.sleep(1)
+
+    # 3. Telegram Setup
+    banner()
+    print(Fore.MAGENTA + "  " + "-"*44)
+    print(Fore.YELLOW + "   [ TELEGRAM BOT SETUP ]")
+    print(Fore.WHITE + f"   1. Click here: {Fore.CYAN}https://t.me/{BOT_USERNAME}")
+    print(Fore.WHITE + "   2. Join the bot and click 'START'.")
+    print(Fore.WHITE + f"   3. Search {Fore.CYAN}@userinfobot{Fore.WHITE} on Telegram.")
+    print(Fore.WHITE + "   4. Start it and copy your 'Id' (Numbers).")
+    print(Fore.MAGENTA + "  " + "-"*44 + "\n")
+    
+    chat_id = input(Fore.CYAN + "  [?] Enter Your Chat ID : " + Fore.WHITE).strip()
+    loading_bar("Connecting to Telegram Server")
+    send_tg(chat_id, f"✅ *Device Connected Successfully!*\n\n👤 *Channel:* {ch_name}\nWelcome to KX YT HUB Premium.")
+    
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump({"key": user_key, "chat_id": chat_id, "exp": exp_date}, f)
+        
+    print(Fore.GREEN + Style.BRIGHT + "\n  [✔] FULL SETUP COMPLETED SUCCESSFULLY!")
+    time.sleep(2)
+    return {"key": user_key, "chat_id": chat_id, "exp": exp_date}, youtube, ch_name, ch_subs
+
+def load_system():
+    if not os.path.exists(CONFIG_FILE):
+        return first_time_setup()
+        
+    with open(CONFIG_FILE, 'r') as f:
+        config = json.load(f)
+    
+    is_valid, status, exp_date = check_license(config['key'])
+    if not is_valid:
+        print(Fore.RED + f"\n  [X] ALERT: Your License is {status}!")
+        os.remove(CONFIG_FILE)
+        sys.exit()
+        
+    loading_bar("Loading Channel Data")
+    youtube, ch_name, ch_subs = auth_youtube()
+    return config, youtube, ch_name, ch_subs
+
+# ==========================================
+# AI & UPLOAD ENGINE
+# ==========================================
+def generate_seo(topic):
+    if not os.path.exists('gemini_api.txt'):
+        print(Fore.RED + "  [X] Error: 'gemini_api.txt' file is missing!")
+        sys.exit()
+    with open('gemini_api.txt', 'r') as f:
+        api_key = f.read().strip()
+        
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-pro')
+    try:
+        res = model.generate_content(f"Create a viral YouTube title, short description, and 15 comma-separated tags for: {topic}. Output ONLY in JSON format: {{\"title\": \"...\", \"description\": \"...\", \"tags\": [\"...\", \"...\"]}}").text
+        return json.loads(res.replace("```json", "").replace("```", "").strip())
+    except:
+        return {"title": topic, "description": "Auto Uploaded via KX YT HUB", "tags": ["kxythub"]}
+
+def process_video(youtube, chat_id, url=None, query=None):
+    send_tg(chat_id, "⏳ *Process Started:* Downloading Media...")
+    print(Fore.CYAN + "\n  [~] Phase 1: Downloading High-Quality Media...")
+    
+    opts = {'format': 'best', 'outtmpl': 'video.mp4', 'writethumbnail': True, 'quiet': True}
+    search = f"{query} creative commons" if query else url
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(search, download=True)
+            video_title = info.get('title', 'Video')
+        print(Fore.GREEN + "  [✔] Download Successful!")
+    except:
+        print(Fore.RED + "  [X] Download Failed!")
+        send_tg(chat_id, "❌ *Error:* Download Failed!")
+        return
+
+    send_tg(chat_id, "🤖 *Process:* AI generating viral SEO...")
+    loading_bar("Phase 2: Generating AI SEO & Tags")
+    seo = generate_seo(video_title)
+    
+    send_tg(chat_id, "🚀 *Process:* Pushing to YouTube Server...")
+    loading_bar("Phase 3: Uploading to YouTube Channel")
+    
+    try:
+        thumb = next((f for f in os.listdir('.') if f.startswith('video.') and f.endswith(('.jpg', '.webp', '.png'))), None)
+        body = {'snippet': {'title': seo['title'][:100], 'description': seo['description'], 'tags': seo['tags'], 'categoryId': '22'}, 'status': {'privacyStatus': 'public'}}
+        
+        req = youtube.videos().insert(part='snippet,status', body=body, media_body=MediaFileUpload('video.mp4', chunksize=-1, resumable=True))
+        vid_id = req.execute().get('id')
+        
+        if thumb:
+            youtube.thumbnails().set(videoId=vid_id, media_body=MediaFileUpload(thumb)).execute()
+
+        os.remove('video.mp4')
+        if thumb: os.remove(thumb)
+
+        print(Fore.GREEN + Style.BRIGHT + f"\n  [✔] UPLOAD SUCCESS! URL: https://youtu.be/{vid_id}")
+        send_tg(chat_id, f"✅ *SUCCESSFULLY UPLOADED!*\n\n📌 *Title:* {seo['title']}\n🔗 *Watch:* https://youtu.be/{vid_id}")
+
+    except Exception as e:
+        print(Fore.RED + f"  [X] Upload Failed: {e}")
+        send_tg(chat_id, f"❌ *Error:* Upload Failed!\nLog: {e}")
+
+# ==========================================
+# MAIN DASHBOARD
+# ==========================================
+def main():
+    config, youtube, ch_name, ch_subs = load_system()
+    
+    while True:
+        banner()
+        print(Fore.CYAN + "  ╔══════ [ USER DASHBOARD ] ════════════════════╗")
+        print(Fore.WHITE + f"  ║ 👤 Channel  : {Fore.YELLOW}{ch_name[:25]:<25} {Fore.WHITE}║")
+        print(Fore.WHITE + f"  ║ 👥 Subs     : {Fore.YELLOW}{ch_subs:<25} {Fore.WHITE}║")
+        print(Fore.WHITE + f"  ║ 💬 Chat ID  : {Fore.YELLOW}{config['chat_id']:<25} {Fore.WHITE}║")
+        print(Fore.WHITE + f"  ║ 📅 Expire   : {Fore.GREEN}{config['exp']} (ACTIVE){' ' * (15 - len(config['exp']))} {Fore.WHITE}║")
+        print(Fore.CYAN + "  ╚══════════════════════════════════════════════╝\n")
+        
+        print(Fore.GREEN + "   [1] Manual Mode " + Fore.WHITE + "(By URL - 100% Safe)")
+        print(Fore.RED + "   [2] Auto Mode   " + Fore.WHITE + "(By Topic - CC Search)")
+        print(Fore.YELLOW + "   [3] Exit Panel\n")
+        
+        choice = input(Fore.CYAN + "  [?] Select Option : " + Fore.WHITE).strip()
+        
+        if choice == '1':
+            url = input(Fore.GREEN + "\n  [>] Paste YouTube Link : " + Fore.WHITE).strip()
+            process_video(youtube, config['chat_id'], url=url)
+            input(Fore.YELLOW + "\n  Press Enter to continue...")
+            
+        elif choice == '2':
+            topic = input(Fore.GREEN + "\n  [>] Enter Video Topic : " + Fore.WHITE).strip()
+            process_video(youtube, config['chat_id'], query=topic)
+            input(Fore.YELLOW + "\n  Press Enter to continue...")
+            
+        elif choice == '3':
+            print(Fore.YELLOW + "\n  [~] Closing KX YT HUB... Good Bye!")
+            sys.exit()
+
+if __name__ == "__main__":
+    main()
