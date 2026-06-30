@@ -4,7 +4,7 @@ import sys
 import time
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import yt_dlp
 from colorama import Fore, Back, Style, init
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -92,10 +92,7 @@ def auth_youtube():
                 print(Fore.RED + "  [X] Error: 'client_secret.json' file is missing!")
                 sys.exit()
             flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-            
-            print(Fore.YELLOW + "\n  [!] Please click the long link below to login (or copy and paste it into Chrome):\n")
-            creds = flow.run_local_server(port=0, open_browser=False)
-            
+            creds = flow.run_local_server(port=0)
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
             
@@ -209,8 +206,28 @@ def generate_seo(topic):
         return {"title": topic[:90], "description": "Auto Uploaded via KX YT HUB", "tags": ["kxythub", "viral"]}
 
 # ==========================================
-# SCHEDULER INPUT ENGINE
+# SCHEDULER & DATE CONVERTER ENGINE
 # ==========================================
+def parse_date_time(date_str, time_str, ampm_opt):
+    ampm = "AM" if ampm_opt == '1' else "PM"
+    try:
+        time_obj = datetime.strptime(f"{time_str} {ampm}", "%I:%M %p")
+        time_24 = time_obj.strftime("%H:%M")
+        full_dt_str = f"{date_str} {time_24}"
+        scheduled_dt = datetime.strptime(full_dt_str, "%d-%m-%Y %H:%M")
+        
+        if scheduled_dt <= datetime.now():
+            return None, "PAST_TIME"
+            
+        local_tz_offset = time.strftime('%z')
+        formatted_offset = f"{local_tz_offset[:3]}:{local_tz_offset[3:]}" if local_tz_offset else "Z"
+        iso_time = scheduled_dt.strftime(f"%Y-%m-%dT%H:%M:00{formatted_offset}")
+        readable_time = f"{date_str} at {time_str} {ampm}"
+        
+        return {"iso": iso_time, "readable": readable_time, "datetime": scheduled_dt, "offset": formatted_offset}, "SUCCESS"
+    except Exception as e:
+        return None, str(e)
+
 def get_schedule_time():
     print(Fore.CYAN + "\n  ╔══════ [ UPLOAD OPTION ] ══════════════════════╗")
     print(Fore.WHITE + "  ║ [1] Publish Immediately (Public)              ║")
@@ -225,37 +242,26 @@ def get_schedule_time():
         time_in = input(Fore.GREEN + "  [>] Time (HH:MM) [e.g., 05:45]: ").strip()
         ampm_opt = input(Fore.GREEN + "  [>] Select AM/PM (1 for AM, 2 for PM): ").strip()
         
-        ampm = "AM" if ampm_opt == '1' else "PM"
-        try:
-            # Parse and convert to 24-hour format
-            time_obj = datetime.strptime(f"{time_in} {ampm}", "%I:%M %p")
-            time_24 = time_obj.strftime("%H:%M")
-            full_dt_str = f"{date_in} {time_24}"
-            scheduled_dt = datetime.strptime(full_dt_str, "%d-%m-%Y %H:%M")
-            
-            # Ensure scheduled time is in the future
-            if scheduled_dt <= datetime.now():
-                print(Fore.RED + "\n  [X] Error: Scheduled time must be in the future!")
-                time.sleep(2)
-                return None, None
-                
-            # Get local timezone offset
-            local_tz_offset = time.strftime('%z')
-            formatted_offset = f"{local_tz_offset[:3]}:{local_tz_offset[3:]}" if local_tz_offset else "Z"
-            
-            iso_time = scheduled_dt.strftime(f"%Y-%m-%dT%H:%M:00{formatted_offset}")
-            readable_time = f"{date_in} at {time_in} {ampm}"
-            return iso_time, readable_time
-        except Exception as e:
-            print(Fore.RED + f"\n  [X] Invalid Date/Time: {e}")
+        data, status = parse_date_time(date_in, time_in, ampm_opt)
+        if data:
+            return data["iso"], data["readable"]
+        else:
+            print(Fore.RED + f"\n  [X] Error: {status}")
             time.sleep(2)
             return None, None
             
     return None, None
 
-def process_video(youtube, chat_id, url=None, query=None):
-    # Ask for scheduling option
-    schedule_iso, schedule_readable = get_schedule_time()
+# ==========================================
+# CORE PROCESS VIDEO (with Bypass Thumbnail Fix)
+# ==========================================
+def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None, auto_schedule_readable=None):
+    # Determine Scheduling Status
+    if auto_schedule_iso:
+        schedule_iso = auto_schedule_iso
+        schedule_readable = auto_schedule_readable
+    else:
+        schedule_iso, schedule_readable = get_schedule_time()
 
     send_tg(chat_id, "⏳ *Process Started:* Downloading Media...")
     print(Fore.CYAN + "\n  [~] Phase 1: Downloading High-Quality Media...")
@@ -292,10 +298,9 @@ def process_video(youtube, chat_id, url=None, query=None):
     try:
         thumb = next((f for f in os.listdir('.') if f.startswith('video.') and f.endswith(('.jpg', '.jpeg', '.png'))), None)
         
-        # Configure Status Body (Schedule or Publish Now)
         status_config = {}
         if schedule_iso:
-            status_config['privacyStatus'] = 'private' # Must be private for schedule
+            status_config['privacyStatus'] = 'private'
             status_config['publishAt'] = schedule_iso
         else:
             status_config['privacyStatus'] = 'public'
@@ -313,13 +318,18 @@ def process_video(youtube, chat_id, url=None, query=None):
         req = youtube.videos().insert(part='snippet,status', body=body, media_body=MediaFileUpload('video.mp4', chunksize=-1, resumable=True))
         vid_id = req.execute().get('id')
         
+        # Safe Thumbnail Upload Bypass (Prevents crashes on unverified channels)
         if thumb:
-            youtube.thumbnails().set(videoId=vid_id, media_body=MediaFileUpload(thumb)).execute()
+            try:
+                youtube.thumbnails().set(videoId=vid_id, media_body=MediaFileUpload(thumb)).execute()
+                print(Fore.GREEN + "  [✔] Thumbnail uploaded successfully!")
+            except Exception as thumb_err:
+                print(Fore.YELLOW + f"  [!] Thumbnail skipped (New/Unverified Channel limitation)")
+                send_tg(chat_id, f"⚠️ *Thumbnail Skipped:* Custom thumbnails require phone verification on your YouTube channel.")
 
         os.remove('video.mp4')
         if thumb: os.remove(thumb)
 
-        # Success Message Configurations
         if schedule_iso:
             success_msg = f"📅 *VIDEO SCHEDULED SUCCESSFULLY!*\n\n📌 *Title:* {seo['title']}\n⏰ *Scheduled For:* {schedule_readable}\n🔗 *Watch Link:* https://youtu.be/{vid_id}"
             print(Fore.GREEN + Style.BRIGHT + f"\n  [✔] SCHEDULED SUCCESS! Target: {schedule_readable}")
@@ -332,6 +342,76 @@ def process_video(youtube, chat_id, url=None, query=None):
     except Exception as e:
         print(Fore.RED + f"  [X] Upload Failed: {e}")
         send_tg(chat_id, f"❌ *Error:* Upload Failed!\nLog: {e}")
+
+# ==========================================
+# BULK VIRAL SCHEDULER ENGINE (NEW!)
+# ==========================================
+def run_bulk_scheduler(youtube, chat_id):
+    print(Fore.MAGENTA + "\n  ╔══════ [ BULK AUTO-SCHEDULE ] ════════════════╗")
+    print(Fore.WHITE + "  ║ Automate multiple video uploads seamlessly  ║")
+    print(Fore.WHITE + "  ║ with custom timers for maximum virality!     ║")
+    print(Fore.MAGENTA + "  ╚══════════════════════════════════════════════╝\n")
+    
+    try:
+        count = int(input(Fore.CYAN + "  [?] How many videos do you want to upload today? : ").strip())
+    except:
+        print(Fore.RED + "  [X] Invalid number!")
+        time.sleep(2)
+        return
+        
+    urls = []
+    for i in range(count):
+        url = input(Fore.GREEN + f"  [>] Enter Video {i+1} URL: ").strip()
+        urls.append(url)
+        
+    print(Fore.CYAN + "\n  ╔══════ [ SELECT VIRAL TIME GAP ] ══════════════╗")
+    print(Fore.WHITE + "  ║ [1] Every 4 Hours (Best for YouTube Shorts)  ║")
+    print(Fore.WHITE + "  ║ [2] Every 6 Hours (Recommended for Videos)   ║")
+    print(Fore.WHITE + "  ║ [3] Every 12 Hours (Daily 2 Videos)          ║")
+    print(Fore.WHITE + "  ║ [4] Every 24 Hours (Daily 1 Video)           ║")
+    print(Fore.CYAN + "  ╚═══════════════════════════════════════════════╝\n")
+    
+    gap_choice = input(Fore.CYAN + "  [?] Select Option (1-4): ").strip()
+    gap_hours = 6
+    if gap_choice == '1': gap_hours = 4
+    elif gap_choice == '2': gap_hours = 6
+    elif gap_choice == '3': gap_hours = 12
+    elif gap_choice == '4': gap_hours = 24
+    
+    print(Fore.YELLOW + "\n  [!] Set Start Schedule Time for First Video:")
+    date_in = input(Fore.GREEN + "  [>] Start Date (DD-MM-YYYY) [e.g., 25-12-2024]: ").strip()
+    time_in = input(Fore.GREEN + "  [>] Start Time (HH:MM) [e.g., 05:45]: ").strip()
+    ampm_opt = input(Fore.GREEN + "  [>] Select AM/PM (1 for AM, 2 for PM): ").strip()
+    
+    data, status = parse_date_time(date_in, time_in, ampm_opt)
+    if not data:
+        print(Fore.RED + f"\n  [X] Scheduling Failed: {status}")
+        time.sleep(2)
+        return
+        
+    current_time = data["datetime"]
+    offset = data["offset"]
+    
+    print(Fore.GREEN + f"\n  [✔] Ready to queue {count} videos on Autopilot!")
+    print(Fore.YELLOW + f"  [*] Time interval set: Every {gap_hours} Hours.\n")
+    time.sleep(2)
+    
+    for idx, url in enumerate(urls):
+        iso_time = current_time.strftime(f"%Y-%m-%dT%H:%M:00{offset}")
+        readable_time = current_time.strftime("%d-%m-%Y at %I:%M %p")
+        
+        print(Fore.MAGENTA + f"\n================================================")
+        print(Fore.YELLOW + f"  🚀 Processing Queue Video {idx+1} of {count}")
+        print(Fore.CYAN + f"  📅 Target Schedule: {readable_time}")
+        print(Fore.MAGENTA + f"================================================")
+        
+        process_video(youtube, chat_id, url=url, auto_schedule_iso=iso_time, auto_schedule_readable=readable_time)
+        
+        # Auto-increment the schedule time for the next video
+        current_time += timedelta(hours=gap_hours)
+        
+    print(Fore.GREEN + Style.BRIGHT + "\n  [✔] ALL BULK VIDEOS SCHEDULED SUCCESSFULLY!")
+    time.sleep(3)
 
 # ==========================================
 # MAIN DASHBOARD
@@ -350,7 +430,8 @@ def main():
         
         print(Fore.GREEN + "   [1] Manual Mode " + Fore.WHITE + "(By URL - 100% Safe)")
         print(Fore.RED + "   [2] Auto Mode   " + Fore.WHITE + "(By Topic - CC Search)")
-        print(Fore.YELLOW + "   [3] Exit Panel\n")
+        print(Fore.MAGENTA + Style.BRIGHT + "   [3] Bulk Auto-Schedule " + Fore.WHITE + "(Viral Strategy 🔥)")
+        print(Fore.YELLOW + "   [4] Exit Panel\n")
         
         choice = input(Fore.CYAN + "  [?] Select Option : " + Fore.WHITE).strip()
         
@@ -365,6 +446,10 @@ def main():
             input(Fore.YELLOW + "\n  Press Enter to continue...")
             
         elif choice == '3':
+            run_bulk_scheduler(youtube, config['chat_id'])
+            input(Fore.YELLOW + "\n  Press Enter to continue...")
+            
+        elif choice == '4':
             print(Fore.YELLOW + "\n  [~] Closing KX YT HUB... Good Bye!")
             sys.exit()
 
