@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import json
+import re
 import requests
 from datetime import datetime, timedelta
 import yt_dlp
@@ -185,7 +186,7 @@ def load_system():
     return config, youtube, ch_name, ch_subs
 
 # ==========================================
-# ADVANCED AI SEO ENGINE (VIRAL TAGS & CLEAN TITLE)
+# ADVANCED AI SEO ENGINE (with Bulletproof Regex JSON Extractor)
 # ==========================================
 def generate_seo(topic):
     if not os.path.exists('gemini_api.txt'):
@@ -196,7 +197,6 @@ def generate_seo(topic):
         
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     
-    # Advanced Prompt to Clean Original Branding and generate high-traffic search tags
     prompt = f"""
     You are an expert YouTube SEO and Algorithm Growth Specialist.
     Analyze this original video title: "{topic}".
@@ -220,9 +220,21 @@ def generate_seo(topic):
     
     try:
         req = requests.post(url, json=payload).json()
+        if 'error' in req:
+            print(Fore.RED + f"  [X] Gemini API Error: {req['error']['message']}")
+            raise Exception(req['error']['message'])
+            
         res_text = req['candidates'][0]['content']['parts'][0]['text']
-        return json.loads(res_text.replace("```json", "").replace("```", "").strip())
-    except:
+        
+        # Smart Regex JSON Extractor (Even extracts from messy markdown!)
+        match = re.search(r'\{.*\}', res_text, re.DOTALL)
+        if match:
+            seo_data = json.loads(match.group(0))
+            if 'title' in seo_data and 'description' in seo_data and 'tags' in seo_data:
+                return seo_data
+        raise Exception("Invalid AI Response Structure")
+    except Exception as e:
+        print(Fore.RED + f"  [X] SEO Generation Failed: {e}. Using Default SEO!")
         return {"title": topic[:90], "description": "Auto Uploaded via KX YT HUB", "tags": ["kxythub", "viral"]}
 
 # ==========================================
@@ -273,7 +285,7 @@ def get_schedule_time():
     return None, None
 
 # ==========================================
-# CORE PROCESS VIDEO (with Bypass Thumbnail Fix)
+# CORE PROCESS VIDEO (with Strict MP4 & Wildcard Cleanup)
 # ==========================================
 def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None, auto_schedule_readable=None):
     if auto_schedule_iso:
@@ -285,11 +297,13 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
     send_tg(chat_id, "⏳ *Process Started:* Downloading Media...")
     print(Fore.CYAN + "\n  [~] Phase 1: Downloading High-Quality Media...")
     
+    # Strict MP4 settings to prevent deletion failures
     opts = {
-        'format': 'best', 
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', 
         'outtmpl': 'video.mp4', 
         'writethumbnail': True, 
         'quiet': True,
+        'merge_output_format': 'mp4',
         'postprocessors': [{
             'key': 'FFmpegThumbnailsConvertor',
             'format': 'jpg',
@@ -345,8 +359,13 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
                 print(Fore.YELLOW + f"  [!] Thumbnail skipped (New/Unverified Channel limitation)")
                 send_tg(chat_id, f"⚠️ *Thumbnail Skipped:* Custom thumbnails require phone verification on your YouTube channel.")
 
-        os.remove('video.mp4')
-        if thumb: os.remove(thumb)
+        # Wildcard Auto-Cleanup (Deletes any temporary download files instantly!)
+        for file in os.listdir('.'):
+            if file.startswith('video'):
+                try:
+                    os.remove(file)
+                except:
+                    pass
 
         if schedule_iso:
             success_msg = f"📅 *VIDEO SCHEDULED SUCCESSFULLY!*\n\n📌 *Title:* {seo['title']}\n⏰ *Scheduled For:* {schedule_readable}\n🔗 *Watch Link:* https://youtu.be/{vid_id}"
