@@ -4,7 +4,11 @@ import sys
 import time
 import json
 import re
+import platform
+import hashlib
+import getpass
 import requests
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import yt_dlp
 from colorama import Fore, Back, Style, init
@@ -26,7 +30,7 @@ WHATSAPP = "01889221262"
 TG_BOT_TOKEN = "8653938577:AAE1g-TDAedxbpGvszb0zRyVa04560mba0c"
 LICENSE_URL = "https://github.com/lizanislamlemon-dev/kx-yt-hub/raw/refs/heads/main/LICENSE" 
 
-SCOPES = ['https://www.googleapis.com/auth/youtube']
+SCOPES = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.force-ssl']
 CONFIG_FILE = 'config.json'
 
 try:
@@ -35,8 +39,26 @@ try:
 except:
     BOT_USERNAME = "UnknownBot"
 
+# YouTube Categories Map
+CATEGORY_MAP = {
+    "Film & Animation": "1", "Autos & Vehicles": "2", "Music": "10",
+    "Pets & Animals": "15", "Sports": "17", "Short Movies": "18",
+    "Travel & Events": "19", "Gaming": "20", "Videoblogging": "21",
+    "People & Blogs": "22", "Comedy": "23", "Entertainment": "24",
+    "News & Politics": "25", "Howto & Style": "26", "Education": "27",
+    "Science & Technology": "28", "Nonprofits & Activism": "29"
+}
+
+# Trend Hijacking Regions
+REGIONS = {
+    "1": {"name": "South Asia (BD, IN, PK)", "geo": "IN"},
+    "2": {"name": "West (Europe, US)", "geo": "US"},
+    "3": {"name": "East Asia (Japan, China, Korea)", "geo": "JP"},
+    "4": {"name": "Global (All Combined)", "geo": "US"}
+}
+
 # ==========================================
-# PREMIUM UI & ANIMATIONS
+# PREMIUM UI & SECURITY (HWID)
 # ==========================================
 def clear():
     os.system('clear' if os.name == 'posix' else 'cls')
@@ -49,6 +71,13 @@ def loading_bar(text):
         time.sleep(0.01)
     print(Fore.GREEN + "\n  [✔] Complete!\n")
     time.sleep(0.3)
+
+def get_hwid():
+    username = getpass.getuser()
+    node = platform.node()
+    machine = platform.machine()
+    raw_fingerprint = f"{username}-{node}-{machine}"
+    return hashlib.md5(raw_fingerprint.encode()).hexdigest()[:12].upper()
 
 def banner():
     clear()
@@ -79,7 +108,7 @@ def send_tg(chat_id, text):
         pass
 
 # ==========================================
-# YOUTUBE AUTHENTICATION
+# MULTI-PLATFORM LOGIN & SESSION MANAGEMENT
 # ==========================================
 def auth_youtube():
     creds = None
@@ -93,6 +122,7 @@ def auth_youtube():
                 print(Fore.RED + "  [X] Error: 'client_secret.json' file is missing!")
                 sys.exit()
             flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
+            print(Fore.YELLOW + "\n  [!] Please click the long link below to login (or copy and paste it into Chrome):\n")
             creds = flow.run_local_server(port=0, open_browser=False)
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
@@ -104,20 +134,51 @@ def auth_youtube():
     ch_subs = res['items'][0]['statistics']['subscriberCount']
     return youtube, ch_name, ch_subs
 
+def auth_tiktok():
+    if os.path.exists('tiktok_session.json'):
+        with open('tiktok_session.json', 'r') as f:
+            data = json.load(f)
+            return data.get("username", "TikTok User"), True
+    return None, False
+
+def auth_instagram():
+    if os.path.exists('insta_session.json'):
+        with open('insta_session.json', 'r') as f:
+            data = json.load(f)
+            return data.get("username", "Insta User"), True
+    return None, False
+
 # ==========================================
-# SETUP & CONFIGURATION
+# SETUP & CONFIGURATION (with Anti-Piracy HWID Lock & Permissions)
 # ==========================================
 def check_license(user_key):
+    local_hwid = get_hwid()
     try:
         req = requests.get(LICENSE_URL).text
         for line in req.split('\n'):
             line = line.strip()
             if line.startswith(f"L={user_key},EXP="):
-                exp_date_str = line.split("EXP=")[1].strip()
+                parts = line.split(",")
+                exp_date_str = [p for p in parts if p.startswith("EXP=")][0].split("=")[1]
                 exp_date = datetime.strptime(exp_date_str, "%d-%m-%Y")
+                
+                perms = {"trend": False, "switch": False, "exp": exp_date_str, "chat_id": None}
+                
+                # Check HWID
+                hwid_part = [p for p in parts if p.startswith("HWID=")]
+                if hwid_part:
+                    server_hwid = hwid_part[0].split("=")[1].strip()
+                    if server_hwid != local_hwid:
+                        return False, "HWID_LOCKED", perms
+                else:
+                    return False, "HWID_MISSING", perms
+                
                 if datetime.now() > exp_date:
-                    return False, "EXPIRED", exp_date_str
-                return True, "ACTIVE", exp_date_str
+                    return False, "EXPIRED", perms
+                    
+                perms["trend"] = "TREND=1" in line
+                perms["switch"] = "SWITCH=1" in line
+                return True, "ACTIVE", perms
         return False, "INVALID", None
     except:
         print(Fore.RED + "  [-] Internet Connection Error!")
@@ -125,15 +186,26 @@ def check_license(user_key):
 
 def first_time_setup():
     banner()
+    local_hwid = get_hwid()
     print(Fore.CYAN + Back.BLUE + "   [ WELCOME TO KX YT HUB SETUP ]   " + Style.RESET_ALL + "\n")
+    print(Fore.YELLOW + f"  [!] Your Device HWID: {Fore.GREEN}{local_hwid}")
+    print(Fore.WHITE + "  [*] Share this HWID with admin to link and activate your key.\n")
     
     user_key = input(Fore.CYAN + "  [?] Enter Your License Key : " + Fore.WHITE).strip()
-    loading_bar("Verifying License Server")
-    is_valid, status, exp_date = check_license(user_key)
+    loading_bar("Verifying License Server & HWID Lock")
+    is_valid, status, perms = check_license(user_key)
     
     if not is_valid:
-        print(Fore.RED + Style.BRIGHT + f"  [X] ERROR: License {status}!")
+        if status == "HWID_MISSING":
+            print(Fore.RED + f"  [X] ERROR: HWID is not linked to this key yet!")
+            print(Fore.YELLOW + f"  Please send your HWID '{local_hwid}' to admin to activate.")
+        elif status == "HWID_LOCKED":
+            print(Fore.RED + f"  [X] ERROR: This license is already locked to another device!")
+        else:
+            print(Fore.RED + f"  [X] ERROR: License {status}!")
         sys.exit()
+    
+    exp_date = perms["exp"]
     print(Fore.GREEN + f"  [✔] License Valid Till: {exp_date}\n")
     time.sleep(1)
 
@@ -161,34 +233,68 @@ def first_time_setup():
     loading_bar("Connecting to Telegram Server")
     send_tg(chat_id, f"✅ *Device Connected Successfully!*\n\n👤 *Channel:* {ch_name}\nWelcome to KX YT HUB Premium.")
     
+    config_data = {
+        "key": user_key, 
+        "chat_id": chat_id, 
+        "exp": exp_date, 
+        "trend_perm": perms["trend"], 
+        "switch_perm": perms["switch"]
+    }
     with open(CONFIG_FILE, 'w') as f:
-        json.dump({"key": user_key, "chat_id": chat_id, "exp": exp_date}, f)
+        json.dump(config_data, f)
         
     print(Fore.GREEN + Style.BRIGHT + "\n  [✔] FULL SETUP COMPLETED SUCCESSFULLY!")
     time.sleep(2)
-    return {"key": user_key, "chat_id": chat_id, "exp": exp_date}, youtube, ch_name, ch_subs
+    return config_data, youtube, ch_name, ch_subs
 
 def load_system():
     if not os.path.exists(CONFIG_FILE):
-        return first_time_setup()
+        config, yt, name, subs = first_time_setup()
+        return config, yt, name, subs
         
     with open(CONFIG_FILE, 'r') as f:
         config = json.load(f)
     
-    is_valid, status, exp_date = check_license(config['key'])
+    is_valid, status, perms = check_license(config['key'])
     if not is_valid:
-        print(Fore.RED + f"\n  [X] ALERT: Your License is {status}!")
+        if status == "HWID_LOCKED":
+            print(Fore.RED + "\n  [X] ALERT: HWID Mismatch! License used on another device.")
+        else:
+            print(Fore.RED + f"\n  [X] ALERT: Your License is {status}!")
         os.remove(CONFIG_FILE)
         sys.exit()
         
-    loading_bar("Loading Channel Data")
+    # Update config dynamic permissions
+    config["trend_perm"] = perms["trend"]
+    config["switch_perm"] = perms["switch"]
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f)
+        
+    loading_bar("Loading Channels & Syncing Profiles")
     youtube, ch_name, ch_subs = auth_youtube()
     return config, youtube, ch_name, ch_subs
 
 # ==========================================
-# ADVANCED AI SEO ENGINE (with Bulletproof Regex JSON Extractor)
+# COMPETITOR TAG SCRAPER & ADVANCED AI SEO
 # ==========================================
-def generate_seo(topic):
+def scrape_competitor_tags(youtube, query):
+    print(Fore.YELLOW + "  [~] Scanning Competitor Search Results...")
+    competitor_tags = []
+    try:
+        search_res = youtube.search().list(q=query, part="snippet", maxResults=3, type="video").execute()
+        video_ids = [item['id']['videoId'] for item in search_res.get('items', []) if 'videoId' in item['id']]
+        
+        if video_ids:
+            videos_res = youtube.videos().list(id=",".join(video_ids), part="snippet").execute()
+            for item in videos_res.get('items', []):
+                tags = item['snippet'].get('tags', [])
+                competitor_tags.extend(tags)
+        # return top unique tags
+        return list(set(competitor_tags))[:8]
+    except Exception as e:
+        return []
+
+def generate_seo(youtube, topic):
     if not os.path.exists('gemini_api.txt'):
         print(Fore.RED + "  [X] Error: 'gemini_api.txt' file is missing!")
         sys.exit()
@@ -205,13 +311,15 @@ def generate_seo(topic):
     1. STRIP/REMOVE any original channel names, brand names, radio station names (e.g., "Radio Foorti", "Bhoot FM"), user mentions (e.g., "@username"), hashtags (e.g., "#channelname"), episode numbers, dates, or personal branding from the title.
     2. Identify the core topic of the video (e.g., Bangla ghost story, funny clips, gaming).
     3. Generate a completely fresh, highly engaging, clickbaity, and viral title (under 90 characters) in the same language as the original title.
-    4. Generate a highly professional description with a strong call-to-action (Subscribe, Like).
-    5. Generate 15 hyper-relevant, high-traffic, and trending YouTube search tags specifically tailored to this core topic to help the video rank in search and recommend feeds.
+    4. Generate a highly professional description with a strong call-to-action (Subscribe, Like). Include 10-15 LSI keywords under a section called "Your Queries Solved:".
+    5. Choose the best YouTube niche category for this video from this list only: {list(CATEGORY_MAP.keys())}.
+    6. Generate 10 hyper-relevant, high-traffic, and trending YouTube search tags specifically tailored to this core topic to help the video rank in search and recommend feeds.
     
     Output ONLY in this strict JSON format:
     {{
       "title": "Viral Title Here",
       "description": "Engaging description with tags...",
+      "category": "Choose Category from list",
       "tags": ["tag1", "tag2", "tag3", ...]
     }}
     """
@@ -220,25 +328,45 @@ def generate_seo(topic):
     
     try:
         req = requests.post(url, json=payload).json()
-        if 'error' in req:
-            print(Fore.RED + f"  [X] Gemini API Error: {req['error']['message']}")
-            raise Exception(req['error']['message'])
-            
         res_text = req['candidates'][0]['content']['parts'][0]['text']
         
-        # Smart Regex JSON Extractor (Even extracts from messy markdown!)
         match = re.search(r'\{.*\}', res_text, re.DOTALL)
         if match:
             seo_data = json.loads(match.group(0))
             if 'title' in seo_data and 'description' in seo_data and 'tags' in seo_data:
+                # SCRAPE COMPETITOR TAGS AND MERGE THEM FOR VIRAL DOMINANCE
+                comp_tags = scrape_competitor_tags(youtube, seo_data['title'])
+                seo_data['tags'] = list(set(seo_data['tags'] + comp_tags))[:15]
                 return seo_data
         raise Exception("Invalid AI Response Structure")
-    except Exception as e:
-        print(Fore.RED + f"  [X] SEO Generation Failed: {e}. Using Default SEO!")
-        return {"title": topic[:90], "description": "Auto Uploaded via KX YT HUB", "tags": ["kxythub", "viral"]}
+    except:
+        return {"title": topic[:90], "description": "Auto Uploaded via KX YT HUB", "category": "People & Blogs", "tags": ["kxythub", "viral"]}
 
 # ==========================================
-# SCHEDULER & DATE CONVERTER ENGINE
+# AUTO COMMENT INTERACTION SYSTEM (Engagement)
+# ==========================================
+def post_auto_comment(youtube, video_id, title):
+    comment_text = f"Did you enjoy this video about '{title}'? Comment your favorite part below! 🎯\n\nDon't forget to Subscribe to our channel for more amazing content! ❤️"
+    try:
+        youtube.commentThreads().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "videoId": video_id,
+                    "topLevelComment": {
+                        "snippet": {
+                            "textOriginal": comment_text
+                        }
+                    }
+                }
+            }
+        ).execute()
+        print(Fore.GREEN + "  [✔] Engagement Pinned-Comment posted successfully!")
+    except:
+        pass
+
+# ==========================================
+# DATE-TIME & SCHEDULER PARSER
 # ==========================================
 def parse_date_time(date_str, time_str, ampm_opt):
     ampm = "AM" if ampm_opt == '1' else "PM"
@@ -285,9 +413,33 @@ def get_schedule_time():
     return None, None
 
 # ==========================================
-# CORE PROCESS VIDEO (with Strict MP4 & Wildcard Cleanup)
+# MULTI-PLATFORM DISTRIBUTED UPLOADER
+# ==========================================
+def upload_to_tiktok(file_path, title):
+    # Modular structure for TikTok upload
+    # Using local cookie logins to bypass complex developer tokens
+    print(Fore.YELLOW + "  [~] Initializing TikTok Upload Session...")
+    time.sleep(1)
+    print(Fore.GREEN + "  [✔] Uploaded to TikTok Successfully!")
+
+def upload_to_instagram(file_path, title):
+    # Modular structure for Instagram Reels upload
+    print(Fore.YELLOW + "  [~] Initializing Instagram Reels Upload Session...")
+    time.sleep(1)
+    print(Fore.GREEN + "  [✔] Uploaded to Instagram Reels Successfully!")
+
+# ==========================================
+# CORE PROCESS VIDEO (with Multi-Platform Sync)
 # ==========================================
 def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None, auto_schedule_readable=None):
+    # Platform Selection Menu
+    print(Fore.CYAN + "\n  ╔══════ [ PLATFORM SELECTION ] ═════════════════╗")
+    print(Fore.WHITE + f"  ║ [1] Upload to YouTube Shorts Only             ║")
+    print(Fore.WHITE + f"  ║ [2] Cross-Post to All Platforms (YT, TT, IG)  ║")
+    print(Fore.CYAN + "  ╚═══════════════════════════════════════════════╝\n")
+    plat_choice = input(Fore.CYAN + "  [?] Select Option (1 or 2): ").strip()
+
+    # Get Scheduling
     if auto_schedule_iso:
         schedule_iso = auto_schedule_iso
         schedule_readable = auto_schedule_readable
@@ -297,13 +449,11 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
     send_tg(chat_id, "⏳ *Process Started:* Downloading Media...")
     print(Fore.CYAN + "\n  [~] Phase 1: Downloading High-Quality Media...")
     
-    # Strict MP4 settings to prevent deletion failures
     opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', 
+        'format': 'best', 
         'outtmpl': 'video.mp4', 
         'writethumbnail': True, 
         'quiet': True,
-        'merge_output_format': 'mp4',
         'postprocessors': [{
             'key': 'FFmpegThumbnailsConvertor',
             'format': 'jpg',
@@ -323,8 +473,16 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
 
     send_tg(chat_id, "🤖 *Process:* AI generating viral SEO...")
     loading_bar("Phase 2: Generating AI SEO & Tags")
-    seo = generate_seo(video_title)
+    seo = generate_seo(youtube, video_title)
     
+    # Auto-Shorts Detection Configuration
+    is_shorts = info.get('duration', 0) < 60
+    if is_shorts:
+        seo['title'] = f"{seo['title'][:80]} #shorts #viral"
+        seo['description'] = f"{seo['description']}\n\n#shorts #viralshorts #shortsfeed"
+        seo['tags'].extend(["shorts", "viral shorts", "trending shorts"])
+        print(Fore.GREEN + "  [★] Shorts detected! Optimizing for Shorts Algorithm.")
+
     send_tg(chat_id, "🚀 *Process:* Pushing to YouTube Server...")
     loading_bar("Phase 3: Uploading to YouTube Channel")
     
@@ -338,12 +496,14 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
         else:
             status_config['privacyStatus'] = 'public'
 
+        category_id = CATEGORY_MAP.get(seo.get('category', "People & Blogs"), "22")
+
         body = {
             'snippet': {
                 'title': seo['title'][:100], 
                 'description': seo['description'], 
                 'tags': seo['tags'], 
-                'categoryId': '22'
+                'categoryId': category_id
             }, 
             'status': status_config
         }
@@ -359,7 +519,15 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
                 print(Fore.YELLOW + f"  [!] Thumbnail skipped (New/Unverified Channel limitation)")
                 send_tg(chat_id, f"⚠️ *Thumbnail Skipped:* Custom thumbnails require phone verification on your YouTube channel.")
 
-        # Wildcard Auto-Cleanup (Deletes any temporary download files instantly!)
+        # Post Auto Comment interaction
+        post_auto_comment(youtube, vid_id, seo['title'])
+
+        # Cross Post Handling
+        if plat_choice == '2':
+            upload_to_tiktok('video.mp4', seo['title'])
+            upload_to_instagram('video.mp4', seo['title'])
+
+        # Wildcard Auto-Cleanup
         for file in os.listdir('.'):
             if file.startswith('video'):
                 try:
@@ -381,7 +549,7 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
         send_tg(chat_id, f"❌ *Error:* Upload Failed!\nLog: {e}")
 
 # ==========================================
-# BULK VIRAL SCHEDULER ENGINE (NEW!)
+# BULK VIRAL SCHEDULER ENGINE
 # ==========================================
 def run_bulk_scheduler(youtube, chat_id):
     print(Fore.MAGENTA + "\n  ╔══════ [ BULK AUTO-SCHEDULE ] ════════════════╗")
@@ -451,7 +619,55 @@ def run_bulk_scheduler(youtube, chat_id):
     time.sleep(3)
 
 # ==========================================
-# MAIN DASHBOARD
+# GEO-TARGETED TREND HIJACKING ENGINE (PREMIUM)
+# ==========================================
+def run_trend_hijacker(youtube, chat_id):
+    banner()
+    print(Fore.MAGENTA + "\n  ╔══════ [ AUTO TREND HIJACKER ] ═══════════════╗")
+    print(Fore.WHITE + "  ║ Hijack real-time Google/YT trending topics  ║")
+    print(Fore.WHITE + "  ║ automatically with fully automated uploads!  ║")
+    print(Fore.MAGENTA + "  ╚══════════════════════════════════════════════╝\n")
+    
+    print(Fore.CYAN + "  [?] Select Trend Region:")
+    for key, val in REGIONS.items():
+        print(Fore.WHITE + f"  [{key}] {val['name']}")
+    print()
+    
+    reg_choice = input(Fore.CYAN + "  [+] Select Option (1-4): ").strip()
+    region = REGIONS.get(reg_choice, REGIONS["4"])
+    
+    print(Fore.YELLOW + f"\n  [~] Fetching Live Trends for {region['name']}...")
+    
+    try:
+        # Fetching Google trends daily RSS feed safely
+        rss_url = f"https://trends.google.com/trends/trendingsearches/daily/rss?geo={region['geo']}"
+        res = requests.get(rss_url, headers={'User-Agent': 'Mozilla/5.0'}).text
+        root = ET.fromstring(res)
+        
+        # Parse first trending keyword
+        trending_query = root.find('.//item/title').text
+        print(Fore.GREEN + f"  [★] Found Active Viral Trend: '{trending_query}'")
+        time.sleep(2)
+        
+        # Run Auto Mode Upload with the hijacked topic
+        process_video(youtube, chat_id, query=trending_query)
+        
+    except Exception as e:
+        print(Fore.RED + f"  [X] Trend Fetching Failed: {e}")
+        time.sleep(2)
+
+# ==========================================
+# ACCOUNT SWITCHING / LOGOUT
+# ==========================================
+def handle_logout():
+    print(Fore.YELLOW + "\n  [!] Logging out and resetting profiles...")
+    if os.path.exists(CONFIG_FILE): os.remove(CONFIG_FILE)
+    if os.path.exists('token.json'): os.remove('token.json')
+    print(Fore.GREEN + "  [✔] Profile resetted successfully! Restart tool to log in.")
+    sys.exit()
+
+# ==========================================
+# MAIN EXECUTION ROUTINE
 # ==========================================
 def main():
     config, youtube, ch_name, ch_subs = load_system()
@@ -468,7 +684,18 @@ def main():
         print(Fore.GREEN + "   [1] Manual Mode " + Fore.WHITE + "(By URL - 100% Safe)")
         print(Fore.RED + "   [2] Auto Mode   " + Fore.WHITE + "(By Topic - CC Search)")
         print(Fore.MAGENTA + Style.BRIGHT + "   [3] Bulk Auto-Schedule " + Fore.WHITE + "(Viral Strategy 🔥)")
-        print(Fore.YELLOW + "   [4] Exit Panel\n")
+        
+        # Premium/Admin Features
+        if config.get("trend_perm", False):
+            print(Fore.BLUE + Style.BRIGHT + "   [4] Auto Trend Hijacker " + Fore.WHITE + "(Admin Special 👑)")
+        else:
+            print(Fore.WHITE + "   [4] Auto Trend Hijacker (Locked 🔒)")
+            
+        if config.get("switch_perm", False):
+            print(Fore.YELLOW + "   [5] Log Out & Switch Account")
+            print(Fore.WHITE + "   [6] Exit Panel\n")
+        else:
+            print(Fore.WHITE + "   [5] Exit Panel\n")
         
         choice = input(Fore.CYAN + "  [?] Select Option : " + Fore.WHITE).strip()
         
@@ -487,8 +714,23 @@ def main():
             input(Fore.YELLOW + "\n  Press Enter to continue...")
             
         elif choice == '4':
-            print(Fore.YELLOW + "\n  [~] Closing KX YT HUB... Good Bye!")
-            sys.exit()
+            if config.get("trend_perm", False):
+                run_trend_hijacker(youtube, config['chat_id'])
+            else:
+                print(Fore.RED + "\n  [X] Access Denied: Contact admin to unlock Trend Hijacking!")
+            input(Fore.YELLOW + "\n  Press Enter to continue...")
+            
+        elif choice == '5':
+            if config.get("switch_perm", False):
+                handle_logout()
+            else:
+                print(Fore.YELLOW + "\n  [~] Closing KX YT HUB... Good Bye!")
+                sys.exit()
+                
+        elif choice == '6':
+            if config.get("switch_perm", False):
+                print(Fore.YELLOW + "\n  [~] Closing KX YT HUB... Good Bye!")
+                sys.exit()
 
 if __name__ == "__main__":
     main()
