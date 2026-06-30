@@ -27,7 +27,6 @@ VERSION = "V12.0 (GOLD EDITION)"
 DEV = "shezin boy"
 PRODUCT = "sz dev studio"
 WHATSAPP = "01889221262"
-TG_BOT_TOKEN = "8653938577:AAE1g-TDAedxbpGvszb0zRyVa04560mba0c"
 LICENSE_URL = "https://github.com/lizanislamlemon-dev/kx-yt-hub/raw/refs/heads/main/LICENSE" 
 
 SCOPES = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.force-ssl']
@@ -86,7 +85,7 @@ def banner():
       _  ____  __ __     __ _______   _    _  _    _  ____  
      | |/ /\ \/ / \ \   / /|__   __| | |  | || |  | ||  _ \ 
      | ' /  \  /   \ \_/ /    | |    | |__| || |  | || |_) |
-     |  <    /  \     \   /     | |    |  __  || |  | ||  _ < 
+     |  <    /  \     \   /     | |    |  __  ║ |  | ||  _ < 
      | . \  / /\ \     | |      | |    | |  | || |__| || |_) |
      |_|\_\/_/  \_\    |_|      |_|    |_|  |_| \____/ |____/ 
     """)
@@ -115,7 +114,7 @@ def send_tg(chat_id, text):
         pass
 
 # ==========================================
-# YOUTUBE AUTHENTICATION
+# YOUTUBE AUTHENTICATION (Defensive SAFE version)
 # ==========================================
 def auth_youtube():
     creds = None
@@ -123,14 +122,21 @@ def auth_youtube():
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                # Safe Bypass: If token refresh fails due to scope mismatch, delete and force login
+                if os.path.exists('token.json'): os.remove(os.remove('token.json'))
+                creds = None
+                
+        if creds is None:
             if not os.path.exists('client_secret.json'):
                 print(Fore.RED + "  [X] Error: 'client_secret.json' file is missing!")
                 sys.exit()
             flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
             print(Fore.YELLOW + "\n  [!] Please click the long link below to login (or copy and paste it into Chrome):\n")
             creds = flow.run_local_server(port=0, open_browser=False)
+            
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
             
@@ -384,12 +390,12 @@ def get_schedule_time():
 def upload_to_tiktok(file_path, title):
     print(Fore.YELLOW + "  [~] Initializing TikTok Upload Session...")
     time.sleep(1)
-    return True # True if successful
+    return True 
 
 def upload_to_instagram(file_path, title):
     print(Fore.YELLOW + "  [~] Initializing Instagram Reels Upload Session...")
     time.sleep(1)
-    return True # True if successful
+    return True 
 
 # ==========================================
 # CORE PROCESS VIDEO (with Multi-Platform Sync & Real Progress)
@@ -481,7 +487,6 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
                 sys.stdout.write(f"\r  " + Fore.YELLOW + f"[>] Uploading to YouTube: [{progress}%] " + Fore.GREEN + ("█" * (progress // 5)) + Fore.WHITE + ("░" * (20 - (progress // 5))))
                 sys.stdout.flush()
                 
-        # Print final 100% cleanly
         sys.stdout.write(f"\r  " + Fore.YELLOW + f"[>] Uploading to YouTube: [100%] " + Fore.GREEN + ("█" * 20) + "\n")
         sys.stdout.flush()
         print(Fore.GREEN + "  [✔] YouTube Server Upload Complete!")
@@ -497,10 +502,8 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
                 print(Fore.YELLOW + f"  [!] Thumbnail skipped (New/Unverified Channel limitation)")
                 send_tg(chat_id, f"⚠️ *Thumbnail Skipped:* Custom thumbnails require phone verification on your YouTube channel.")
 
-        # Post Auto Comment interaction
         post_auto_comment(youtube, vid_id, seo['title'])
 
-        # Cross Post Handling & Detailed TG Report Configurations
         tt_status = "❌ *Not Selected*"
         ig_status = "❌ *Not Selected*"
         if plat_choice == '2':
@@ -509,7 +512,6 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
             tt_status = "✅ *Success*" if tt_success else "❌ *Failed*"
             ig_status = "✅ *Success*" if ig_success else "❌ *Failed*"
 
-        # Wildcard Auto-Cleanup
         for file in os.listdir('.'):
             if file.startswith('video'):
                 try:
@@ -517,7 +519,6 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
                 except:
                     pass
 
-        # Beautifully Formatted Multi-Platform Success Report on Telegram
         report = f"""📊 *PLATFORM UPLOAD REPORT*
 
 🔴 *YouTube Shorts:* {yt_status}
@@ -598,7 +599,6 @@ def run_bulk_scheduler(youtube, chat_id):
         
         process_video(youtube, chat_id, url=url, auto_schedule_iso=iso_time, auto_schedule_readable=readable_time)
         
-        # Auto-increment the schedule time for the next video
         current_time += timedelta(hours=gap_hours)
         
     print(Fore.GREEN + Style.BRIGHT + "\n  [✔] ALL BULK VIDEOS SCHEDULED SUCCESSFULLY!")
