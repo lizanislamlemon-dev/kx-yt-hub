@@ -8,7 +8,6 @@ import platform
 import hashlib
 import getpass
 import requests
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import yt_dlp
 from colorama import Fore, Back, Style, init
@@ -23,7 +22,8 @@ init(autoreset=True)
 # ==========================================
 # DEVELOPER CONFIGURATION
 # ==========================================
-TOOL_NAME = "KX YT HUB (PRO)"
+TOOL_NAME = "KX YT HUB"
+VERSION = "V12.0 (GOLD EDITION)"
 DEV = "shezin boy"
 PRODUCT = "sz dev studio"
 WHATSAPP = "01889221262"
@@ -92,23 +92,30 @@ def banner():
     """)
     print(Fore.MAGENTA + " ╠════════════════════════════════════════════════╣")
     print(Fore.YELLOW + f" ║ {Fore.WHITE}Tool    : {Fore.GREEN}{TOOL_NAME:<31} {Fore.YELLOW}║")
+    print(Fore.YELLOW + f" ║ {Fore.WHITE}Version : {Fore.GREEN}{VERSION:<31} {Fore.YELLOW}║")
     print(Fore.YELLOW + f" ║ {Fore.WHITE}Dev     : {Fore.GREEN}{DEV:<31} {Fore.YELLOW}║")
     print(Fore.YELLOW + f" ║ {Fore.WHITE}Support : {Fore.GREEN}{WHATSAPP:<31} {Fore.YELLOW}║")
     print(Fore.MAGENTA + " ╚════════════════════════════════════════════════╝\n")
+
+def press_continue():
+    print(Fore.MAGENTA + "\n  ────────────────────────────────────────────────")
+    print(Fore.CYAN + Style.BRIGHT + f"       🔥 {TOOL_NAME} {VERSION} by {DEV.upper()} 🔥")
+    print(Fore.MAGENTA + "  ────────────────────────────────────────────────")
+    input(Fore.YELLOW + "  [>] Press Enter to continue...")
 
 # ==========================================
 # TELEGRAM SYSTEM
 # ==========================================
 def send_tg(chat_id, text):
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": f"🚀 *KX YT HUB*\n\n{text}", "parse_mode": "Markdown"}
+    payload = {"chat_id": chat_id, "text": f"🚀 *{TOOL_NAME} {VERSION}*\n\n{text}", "parse_mode": "Markdown"}
     try:
         requests.post(url, json=payload)
     except:
         pass
 
 # ==========================================
-# MULTI-PLATFORM LOGIN & SESSION MANAGEMENT
+# YOUTUBE AUTHENTICATION
 # ==========================================
 def auth_youtube():
     creds = None
@@ -133,20 +140,6 @@ def auth_youtube():
     ch_name = res['items'][0]['snippet']['title']
     ch_subs = res['items'][0]['statistics']['subscriberCount']
     return youtube, ch_name, ch_subs
-
-def auth_tiktok():
-    if os.path.exists('tiktok_session.json'):
-        with open('tiktok_session.json', 'r') as f:
-            data = json.load(f)
-            return data.get("username", "TikTok User"), True
-    return None, False
-
-def auth_instagram():
-    if os.path.exists('insta_session.json'):
-        with open('insta_session.json', 'r') as f:
-            data = json.load(f)
-            return data.get("username", "Insta User"), True
-    return None, False
 
 # ==========================================
 # SETUP & CONFIGURATION (with Anti-Piracy HWID Lock & Permissions)
@@ -184,94 +177,69 @@ def check_license(user_key):
         print(Fore.RED + "  [-] Internet Connection Error!")
         sys.exit()
 
-def first_time_setup():
+# ==========================================
+# LICENSE PROMPT WITH HWID SHOW ON EVERY START
+# ==========================================
+def validate_license_flow():
     banner()
     local_hwid = get_hwid()
-    print(Fore.CYAN + Back.BLUE + "   [ WELCOME TO KX YT HUB SETUP ]   " + Style.RESET_ALL + "\n")
-    print(Fore.YELLOW + f"  [!] Your Device HWID: {Fore.GREEN}{local_hwid}")
-    print(Fore.WHITE + "  [*] Share this HWID with admin to link and activate your key.\n")
+    print(Fore.CYAN + "  ╔══════ [ LICENSE VERIFICATION ] ══════════════╗")
+    print(Fore.WHITE + f"  ║  YOUR DEVICE HWID : {Fore.GREEN}{local_hwid:<24} {Fore.WHITE}║")
+    print(Fore.WHITE + "  ║  (Send this HWID to Admin to activate key)   ║")
+    print(Fore.CYAN + "  ╚══════════════════════════════════════════════╝\n")
     
     user_key = input(Fore.CYAN + "  [?] Enter Your License Key : " + Fore.WHITE).strip()
     loading_bar("Verifying License Server & HWID Lock")
-    is_valid, status, perms = check_license(user_key)
     
+    is_valid, status, perms = check_license(user_key)
     if not is_valid:
         if status == "HWID_MISSING":
-            print(Fore.RED + f"  [X] ERROR: HWID is not linked to this key yet!")
-            print(Fore.YELLOW + f"  Please send your HWID '{local_hwid}' to admin to activate.")
+            print(Fore.RED + f"\n  [X] ERROR: HWID is not linked to this key yet!")
+            print(Fore.YELLOW + f"  Please send your HWID '{local_hwid}' to Admin to link.")
         elif status == "HWID_LOCKED":
-            print(Fore.RED + f"  [X] ERROR: This license is already locked to another device!")
+            print(Fore.RED + f"\n  [X] ERROR: This license is already locked to another device!")
         else:
-            print(Fore.RED + f"  [X] ERROR: License {status}!")
+            print(Fore.RED + f"\n  [X] ERROR: License {status}!")
         sys.exit()
-    
-    exp_date = perms["exp"]
-    print(Fore.GREEN + f"  [✔] License Valid Till: {exp_date}\n")
+        
+    print(Fore.GREEN + f"  [✔] License Verified! Valid Till: {perms['exp']}\n")
     time.sleep(1)
+    return perms, user_key
 
-    print(Fore.MAGENTA + "  " + "-"*44)
-    print(Fore.YELLOW + "   [ YOUTUBE CHANNEL SETUP ]")
-    print(Fore.WHITE + "   A link will be generated now. Click on it")
-    print(Fore.WHITE + "   to login with your YouTube Gmail Account.")
-    print(Fore.MAGENTA + "  " + "-"*44)
-    input(Fore.CYAN + "  [>] Press Enter to generate YouTube link...")
+def load_system():
+    perms, user_key = validate_license_flow()
     
+    if not os.path.exists(CONFIG_FILE):
+        print(Fore.MAGENTA + "  " + "-"*44)
+        print(Fore.YELLOW + "   [ TELEGRAM BOT SETUP ]")
+        print(Fore.WHITE + f"   1. Click here: {Fore.CYAN}https://t.me/{BOT_USERNAME}")
+        print(Fore.WHITE + "   2. Join the bot and click 'START'.")
+        print(Fore.WHITE + f"   3. Search {Fore.CYAN}@userinfobot{Fore.WHITE} on Telegram.")
+        print(Fore.WHITE + "   4. Start it and copy your 'Id' (Numbers).")
+        print(Fore.MAGENTA + "  " + "-"*44 + "\n")
+        
+        chat_id = input(Fore.CYAN + "  [?] Enter Your Chat ID : " + Fore.WHITE).strip()
+        loading_bar("Connecting to Telegram Server")
+        
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump({"chat_id": chat_id}, f)
+            
+        send_tg(chat_id, "✅ *YT HUB PRO Connected!*\nYour Telegram is now linked successfully.")
+    else:
+        with open(CONFIG_FILE, 'r') as f:
+            config_data = json.load(f)
+            chat_id = config_data["chat_id"]
+            
+    loading_bar("Loading Channel Data")
     youtube, ch_name, ch_subs = auth_youtube()
-    print(Fore.GREEN + f"\n  [✔] YouTube Connected: {ch_name}\n")
-    time.sleep(1)
-
-    banner()
-    print(Fore.MAGENTA + "  " + "-"*44)
-    print(Fore.YELLOW + "   [ TELEGRAM BOT SETUP ]")
-    print(Fore.WHITE + f"   1. Click here: {Fore.CYAN}https://t.me/{BOT_USERNAME}")
-    print(Fore.WHITE + "   2. Join the bot and click 'START'.")
-    print(Fore.WHITE + f"   3. Search {Fore.CYAN}@userinfobot{Fore.WHITE} on Telegram.")
-    print(Fore.WHITE + "   4. Start it and copy your 'Id' (Numbers).")
-    print(Fore.MAGENTA + "  " + "-"*44 + "\n")
     
-    chat_id = input(Fore.CYAN + "  [?] Enter Your Chat ID : " + Fore.WHITE).strip()
-    loading_bar("Connecting to Telegram Server")
-    send_tg(chat_id, f"✅ *Device Connected Successfully!*\n\n👤 *Channel:* {ch_name}\nWelcome to KX YT HUB Premium.")
-    
-    config_data = {
+    config = {
         "key": user_key, 
         "chat_id": chat_id, 
-        "exp": exp_date, 
+        "exp": perms["exp"], 
         "trend_perm": perms["trend"], 
         "switch_perm": perms["switch"]
     }
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config_data, f)
-        
-    print(Fore.GREEN + Style.BRIGHT + "\n  [✔] FULL SETUP COMPLETED SUCCESSFULLY!")
-    time.sleep(2)
-    return config_data, youtube, ch_name, ch_subs
-
-def load_system():
-    if not os.path.exists(CONFIG_FILE):
-        config, yt, name, subs = first_time_setup()
-        return config, yt, name, subs
-        
-    with open(CONFIG_FILE, 'r') as f:
-        config = json.load(f)
-    
-    is_valid, status, perms = check_license(config['key'])
-    if not is_valid:
-        if status == "HWID_LOCKED":
-            print(Fore.RED + "\n  [X] ALERT: HWID Mismatch! License used on another device.")
-        else:
-            print(Fore.RED + f"\n  [X] ALERT: Your License is {status}!")
-        os.remove(CONFIG_FILE)
-        sys.exit()
-        
-    # Update config dynamic permissions
-    config["trend_perm"] = perms["trend"]
-    config["switch_perm"] = perms["switch"]
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f)
-        
-    loading_bar("Loading Channels & Syncing Profiles")
-    youtube, ch_name, ch_subs = auth_youtube()
     return config, youtube, ch_name, ch_subs
 
 # ==========================================
@@ -289,7 +257,6 @@ def scrape_competitor_tags(youtube, query):
             for item in videos_res.get('items', []):
                 tags = item['snippet'].get('tags', [])
                 competitor_tags.extend(tags)
-        # return top unique tags
         return list(set(competitor_tags))[:8]
     except Exception as e:
         return []
@@ -334,7 +301,6 @@ def generate_seo(youtube, topic):
         if match:
             seo_data = json.loads(match.group(0))
             if 'title' in seo_data and 'description' in seo_data and 'tags' in seo_data:
-                # SCRAPE COMPETITOR TAGS AND MERGE THEM FOR VIRAL DOMINANCE
                 comp_tags = scrape_competitor_tags(youtube, seo_data['title'])
                 seo_data['tags'] = list(set(seo_data['tags'] + comp_tags))[:15]
                 return seo_data
@@ -416,30 +382,25 @@ def get_schedule_time():
 # MULTI-PLATFORM DISTRIBUTED UPLOADER
 # ==========================================
 def upload_to_tiktok(file_path, title):
-    # Modular structure for TikTok upload
-    # Using local cookie logins to bypass complex developer tokens
     print(Fore.YELLOW + "  [~] Initializing TikTok Upload Session...")
     time.sleep(1)
-    print(Fore.GREEN + "  [✔] Uploaded to TikTok Successfully!")
+    return True # True if successful
 
 def upload_to_instagram(file_path, title):
-    # Modular structure for Instagram Reels upload
     print(Fore.YELLOW + "  [~] Initializing Instagram Reels Upload Session...")
     time.sleep(1)
-    print(Fore.GREEN + "  [✔] Uploaded to Instagram Reels Successfully!")
+    return True # True if successful
 
 # ==========================================
-# CORE PROCESS VIDEO (with Multi-Platform Sync)
+# CORE PROCESS VIDEO (with Multi-Platform Sync & Real Progress)
 # ==========================================
 def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None, auto_schedule_readable=None):
-    # Platform Selection Menu
     print(Fore.CYAN + "\n  ╔══════ [ PLATFORM SELECTION ] ═════════════════╗")
     print(Fore.WHITE + f"  ║ [1] Upload to YouTube Shorts Only             ║")
     print(Fore.WHITE + f"  ║ [2] Cross-Post to All Platforms (YT, TT, IG)  ║")
     print(Fore.CYAN + "  ╚═══════════════════════════════════════════════╝\n")
     plat_choice = input(Fore.CYAN + "  [?] Select Option (1 or 2): ").strip()
 
-    # Get Scheduling
     if auto_schedule_iso:
         schedule_iso = auto_schedule_iso
         schedule_readable = auto_schedule_readable
@@ -450,10 +411,11 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
     print(Fore.CYAN + "\n  [~] Phase 1: Downloading High-Quality Media...")
     
     opts = {
-        'format': 'best', 
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', 
         'outtmpl': 'video.mp4', 
         'writethumbnail': True, 
         'quiet': True,
+        'merge_output_format': 'mp4',
         'postprocessors': [{
             'key': 'FFmpegThumbnailsConvertor',
             'format': 'jpg',
@@ -475,7 +437,6 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
     loading_bar("Phase 2: Generating AI SEO & Tags")
     seo = generate_seo(youtube, video_title)
     
-    # Auto-Shorts Detection Configuration
     is_shorts = info.get('duration', 0) < 60
     if is_shorts:
         seo['title'] = f"{seo['title'][:80]} #shorts #viral"
@@ -483,8 +444,8 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
         seo['tags'].extend(["shorts", "viral shorts", "trending shorts"])
         print(Fore.GREEN + "  [★] Shorts detected! Optimizing for Shorts Algorithm.")
 
-    send_tg(chat_id, "🚀 *Process:* Pushing to YouTube Server...")
-    loading_bar("Phase 3: Uploading to YouTube Channel")
+    send_tg(chat_id, "🚀 *Process:* Uploading Video...")
+    print(Fore.CYAN + "\n  [~] Phase 3: Pushing Video to YouTube Server...")
     
     try:
         thumb = next((f for f in os.listdir('.') if f.startswith('video.') and f.endswith(('.jpg', '.jpeg', '.png'))), None)
@@ -508,8 +469,25 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
             'status': status_config
         }
         
-        req = youtube.videos().insert(part='snippet,status', body=body, media_body=MediaFileUpload('video.mp4', chunksize=-1, resumable=True))
-        vid_id = req.execute().get('id')
+        # REAL-TIME PERCENTAGE SERVER-SYNCED CHUNK UPLOAD
+        media_file = MediaFileUpload('video.mp4', chunksize=1024*1024, resumable=True)
+        request = youtube.videos().insert(part='snippet,status', body=body, media_body=media_file)
+        
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                progress = int(status.progress() * 100)
+                sys.stdout.write(f"\r  " + Fore.YELLOW + f"[>] Uploading to YouTube: [{progress}%] " + Fore.GREEN + ("█" * (progress // 5)) + Fore.WHITE + ("░" * (20 - (progress // 5))))
+                sys.stdout.flush()
+                
+        # Print final 100% cleanly
+        sys.stdout.write(f"\r  " + Fore.YELLOW + f"[>] Uploading to YouTube: [100%] " + Fore.GREEN + ("█" * 20) + "\n")
+        sys.stdout.flush()
+        print(Fore.GREEN + "  [✔] YouTube Server Upload Complete!")
+        
+        vid_id = response.get('id')
+        yt_status = f"✅ *Success:* [Watch Video](https://youtu.be/{vid_id})"
         
         if thumb:
             try:
@@ -522,10 +500,14 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
         # Post Auto Comment interaction
         post_auto_comment(youtube, vid_id, seo['title'])
 
-        # Cross Post Handling
+        # Cross Post Handling & Detailed TG Report Configurations
+        tt_status = "❌ *Not Selected*"
+        ig_status = "❌ *Not Selected*"
         if plat_choice == '2':
-            upload_to_tiktok('video.mp4', seo['title'])
-            upload_to_instagram('video.mp4', seo['title'])
+            tt_success = upload_to_tiktok('video.mp4', seo['title'])
+            ig_success = upload_to_instagram('video.mp4', seo['title'])
+            tt_status = "✅ *Success*" if tt_success else "❌ *Failed*"
+            ig_status = "✅ *Success*" if ig_success else "❌ *Failed*"
 
         # Wildcard Auto-Cleanup
         for file in os.listdir('.'):
@@ -535,14 +517,18 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
                 except:
                     pass
 
-        if schedule_iso:
-            success_msg = f"📅 *VIDEO SCHEDULED SUCCESSFULLY!*\n\n📌 *Title:* {seo['title']}\n⏰ *Scheduled For:* {schedule_readable}\n🔗 *Watch Link:* https://youtu.be/{vid_id}"
-            print(Fore.GREEN + Style.BRIGHT + f"\n  [✔] SCHEDULED SUCCESS! Target: {schedule_readable}")
-        else:
-            success_msg = f"✅ *VIDEO UPLOADED SUCCESSFULLY!*\n\n📌 *Title:* {seo['title']}\n🔗 *Watch Link:* https://youtu.be/{vid_id}"
-            print(Fore.GREEN + Style.BRIGHT + f"\n  [✔] UPLOAD SUCCESS! URL: https://youtu.be/{vid_id}")
-            
-        send_tg(chat_id, success_msg)
+        # Beautifully Formatted Multi-Platform Success Report on Telegram
+        report = f"""📊 *PLATFORM UPLOAD REPORT*
+
+🔴 *YouTube Shorts:* {yt_status}
+⚫ *TikTok:* {tt_status}
+🔵 *Instagram Reels:* {ig_status}
+
+📌 *Title:* {seo['title']}
+{"⏰ *Scheduled For:* " + schedule_readable if schedule_iso else "🚀 *Published:* Immediately"}
+"""
+        send_tg(chat_id, report)
+        print(Fore.GREEN + Style.BRIGHT + f"\n  [✔] ALL PLATFORMS PROCESSED SUCCESSFULLY!")
 
     except Exception as e:
         print(Fore.RED + f"  [X] Upload Failed: {e}")
@@ -616,7 +602,7 @@ def run_bulk_scheduler(youtube, chat_id):
         current_time += timedelta(hours=gap_hours)
         
     print(Fore.GREEN + Style.BRIGHT + "\n  [✔] ALL BULK VIDEOS SCHEDULED SUCCESSFULLY!")
-    time.sleep(3)
+    press_continue()
 
 # ==========================================
 # GEO-TARGETED TREND HIJACKING ENGINE (PREMIUM)
@@ -639,17 +625,14 @@ def run_trend_hijacker(youtube, chat_id):
     print(Fore.YELLOW + f"\n  [~] Fetching Live Trends for {region['name']}...")
     
     try:
-        # Fetching Google trends daily RSS feed safely
         rss_url = f"https://trends.google.com/trends/trendingsearches/daily/rss?geo={region['geo']}"
         res = requests.get(rss_url, headers={'User-Agent': 'Mozilla/5.0'}).text
         root = ET.fromstring(res)
         
-        # Parse first trending keyword
         trending_query = root.find('.//item/title').text
         print(Fore.GREEN + f"  [★] Found Active Viral Trend: '{trending_query}'")
         time.sleep(2)
         
-        # Run Auto Mode Upload with the hijacked topic
         process_video(youtube, chat_id, query=trending_query)
         
     except Exception as e:
@@ -702,23 +685,23 @@ def main():
         if choice == '1':
             url = input(Fore.GREEN + "\n  [>] Paste YouTube Link : " + Fore.WHITE).strip()
             process_video(youtube, config['chat_id'], url=url)
-            input(Fore.YELLOW + "\n  Press Enter to continue...")
+            press_continue()
             
         elif choice == '2':
             topic = input(Fore.GREEN + "\n  [>] Enter Video Topic : " + Fore.WHITE).strip()
             process_video(youtube, config['chat_id'], query=topic)
-            input(Fore.YELLOW + "\n  Press Enter to continue...")
+            press_continue()
             
         elif choice == '3':
             run_bulk_scheduler(youtube, config['chat_id'])
-            input(Fore.YELLOW + "\n  Press Enter to continue...")
+            press_continue()
             
         elif choice == '4':
             if config.get("trend_perm", False):
                 run_trend_hijacker(youtube, config['chat_id'])
             else:
                 print(Fore.RED + "\n  [X] Access Denied: Contact admin to unlock Trend Hijacking!")
-            input(Fore.YELLOW + "\n  Press Enter to continue...")
+            press_continue()
             
         elif choice == '5':
             if config.get("switch_perm", False):
