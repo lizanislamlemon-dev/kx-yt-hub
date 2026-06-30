@@ -93,7 +93,6 @@ def auth_youtube():
                 sys.exit()
             flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
             
-            # FIX: open_browser=False prevents termux from crashing
             print(Fore.YELLOW + "\n  [!] Please click the long link below to login (or copy and paste it into Chrome):\n")
             creds = flow.run_local_server(port=0, open_browser=False)
             
@@ -209,11 +208,68 @@ def generate_seo(topic):
     except:
         return {"title": topic[:90], "description": "Auto Uploaded via KX YT HUB", "tags": ["kxythub", "viral"]}
 
+# ==========================================
+# SCHEDULER INPUT ENGINE
+# ==========================================
+def get_schedule_time():
+    print(Fore.CYAN + "\n  ╔══════ [ UPLOAD OPTION ] ══════════════════════╗")
+    print(Fore.WHITE + "  ║ [1] Publish Immediately (Public)              ║")
+    print(Fore.WHITE + "  ║ [2] Schedule Upload (Set Custom Date & Time)  ║")
+    print(Fore.CYAN + "  ╚═══════════════════════════════════════════════╝\n")
+    
+    choice = input(Fore.CYAN + "  [?] Select Option (1 or 2): ").strip()
+    
+    if choice == '2':
+        print(Fore.YELLOW + "\n  [!] Enter scheduling details:")
+        date_in = input(Fore.GREEN + "  [>] Date (DD-MM-YYYY) [e.g., 25-12-2024]: ").strip()
+        time_in = input(Fore.GREEN + "  [>] Time (HH:MM) [e.g., 05:45]: ").strip()
+        ampm_opt = input(Fore.GREEN + "  [>] Select AM/PM (1 for AM, 2 for PM): ").strip()
+        
+        ampm = "AM" if ampm_opt == '1' else "PM"
+        try:
+            # Parse and convert to 24-hour format
+            time_obj = datetime.strptime(f"{time_in} {ampm}", "%I:%M %p")
+            time_24 = time_obj.strftime("%H:%M")
+            full_dt_str = f"{date_in} {time_24}"
+            scheduled_dt = datetime.strptime(full_dt_str, "%d-%m-%Y %H:%M")
+            
+            # Ensure scheduled time is in the future
+            if scheduled_dt <= datetime.now():
+                print(Fore.RED + "\n  [X] Error: Scheduled time must be in the future!")
+                time.sleep(2)
+                return None, None
+                
+            # Get local timezone offset
+            local_tz_offset = time.strftime('%z')
+            formatted_offset = f"{local_tz_offset[:3]}:{local_tz_offset[3:]}" if local_tz_offset else "Z"
+            
+            iso_time = scheduled_dt.strftime(f"%Y-%m-%dT%H:%M:00{formatted_offset}")
+            readable_time = f"{date_in} at {time_in} {ampm}"
+            return iso_time, readable_time
+        except Exception as e:
+            print(Fore.RED + f"\n  [X] Invalid Date/Time: {e}")
+            time.sleep(2)
+            return None, None
+            
+    return None, None
+
 def process_video(youtube, chat_id, url=None, query=None):
+    # Ask for scheduling option
+    schedule_iso, schedule_readable = get_schedule_time()
+
     send_tg(chat_id, "⏳ *Process Started:* Downloading Media...")
     print(Fore.CYAN + "\n  [~] Phase 1: Downloading High-Quality Media...")
     
-    opts = {'format': 'best', 'outtmpl': 'video.mp4', 'writethumbnail': True, 'quiet': True}
+    opts = {
+        'format': 'best', 
+        'outtmpl': 'video.mp4', 
+        'writethumbnail': True, 
+        'quiet': True,
+        'postprocessors': [{
+            'key': 'FFmpegThumbnailsConvertor',
+            'format': 'jpg',
+        }]
+    }
     search = f"{query} creative commons" if query else url
 
     try:
@@ -234,8 +290,25 @@ def process_video(youtube, chat_id, url=None, query=None):
     loading_bar("Phase 3: Uploading to YouTube Channel")
     
     try:
-        thumb = next((f for f in os.listdir('.') if f.startswith('video.') and f.endswith(('.jpg', '.webp', '.png'))), None)
-        body = {'snippet': {'title': seo['title'][:100], 'description': seo['description'], 'tags': seo['tags'], 'categoryId': '22'}, 'status': {'privacyStatus': 'public'}}
+        thumb = next((f for f in os.listdir('.') if f.startswith('video.') and f.endswith(('.jpg', '.jpeg', '.png'))), None)
+        
+        # Configure Status Body (Schedule or Publish Now)
+        status_config = {}
+        if schedule_iso:
+            status_config['privacyStatus'] = 'private' # Must be private for schedule
+            status_config['publishAt'] = schedule_iso
+        else:
+            status_config['privacyStatus'] = 'public'
+
+        body = {
+            'snippet': {
+                'title': seo['title'][:100], 
+                'description': seo['description'], 
+                'tags': seo['tags'], 
+                'categoryId': '22'
+            }, 
+            'status': status_config
+        }
         
         req = youtube.videos().insert(part='snippet,status', body=body, media_body=MediaFileUpload('video.mp4', chunksize=-1, resumable=True))
         vid_id = req.execute().get('id')
@@ -246,8 +319,15 @@ def process_video(youtube, chat_id, url=None, query=None):
         os.remove('video.mp4')
         if thumb: os.remove(thumb)
 
-        print(Fore.GREEN + Style.BRIGHT + f"\n  [✔] UPLOAD SUCCESS! URL: https://youtu.be/{vid_id}")
-        send_tg(chat_id, f"✅ *SUCCESSFULLY UPLOADED!*\n\n📌 *Title:* {seo['title']}\n🔗 *Watch:* https://youtu.be/{vid_id}")
+        # Success Message Configurations
+        if schedule_iso:
+            success_msg = f"📅 *VIDEO SCHEDULED SUCCESSFULLY!*\n\n📌 *Title:* {seo['title']}\n⏰ *Scheduled For:* {schedule_readable}\n🔗 *Watch Link:* https://youtu.be/{vid_id}"
+            print(Fore.GREEN + Style.BRIGHT + f"\n  [✔] SCHEDULED SUCCESS! Target: {schedule_readable}")
+        else:
+            success_msg = f"✅ *VIDEO UPLOADED SUCCESSFULLY!*\n\n📌 *Title:* {seo['title']}\n🔗 *Watch Link:* https://youtu.be/{vid_id}"
+            print(Fore.GREEN + Style.BRIGHT + f"\n  [✔] UPLOAD SUCCESS! URL: https://youtu.be/{vid_id}")
+            
+        send_tg(chat_id, success_msg)
 
     except Exception as e:
         print(Fore.RED + f"  [X] Upload Failed: {e}")
