@@ -92,7 +92,7 @@ def auth_youtube():
                 print(Fore.RED + "  [X] Error: 'client_secret.json' file is missing!")
                 sys.exit()
             flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(port=0, open_browser=False)
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
             
@@ -185,7 +185,7 @@ def load_system():
     return config, youtube, ch_name, ch_subs
 
 # ==========================================
-# AI (REST API) & UPLOAD ENGINE
+# ADVANCED AI SEO ENGINE (VIRAL TAGS & CLEAN TITLE)
 # ==========================================
 def generate_seo(topic):
     if not os.path.exists('gemini_api.txt'):
@@ -195,7 +195,27 @@ def generate_seo(topic):
         api_key = f.read().strip()
         
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-    prompt = f"Create a viral YouTube title, short description, and 15 comma-separated tags for: {topic}. Output ONLY in JSON format: {{\"title\": \"...\", \"description\": \"...\", \"tags\": [\"...\", \"...\"]}}"
+    
+    # Advanced Prompt to Clean Original Branding and generate high-traffic search tags
+    prompt = f"""
+    You are an expert YouTube SEO and Algorithm Growth Specialist.
+    Analyze this original video title: "{topic}".
+    
+    CRITICAL INSTRUCTIONS:
+    1. STRIP/REMOVE any original channel names, brand names, radio station names (e.g., "Radio Foorti", "Bhoot FM"), user mentions (e.g., "@username"), hashtags (e.g., "#channelname"), episode numbers, dates, or personal branding from the title.
+    2. Identify the core topic of the video (e.g., Bangla ghost story, funny clips, gaming).
+    3. Generate a completely fresh, highly engaging, clickbaity, and viral title (under 90 characters) in the same language as the original title.
+    4. Generate a highly professional description with a strong call-to-action (Subscribe, Like).
+    5. Generate 15 hyper-relevant, high-traffic, and trending YouTube search tags specifically tailored to this core topic to help the video rank in search and recommend feeds.
+    
+    Output ONLY in this strict JSON format:
+    {{
+      "title": "Viral Title Here",
+      "description": "Engaging description with tags...",
+      "tags": ["tag1", "tag2", "tag3", ...]
+    }}
+    """
+    
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
     try:
@@ -256,7 +276,6 @@ def get_schedule_time():
 # CORE PROCESS VIDEO (with Bypass Thumbnail Fix)
 # ==========================================
 def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None, auto_schedule_readable=None):
-    # Determine Scheduling Status
     if auto_schedule_iso:
         schedule_iso = auto_schedule_iso
         schedule_readable = auto_schedule_readable
@@ -318,7 +337,6 @@ def process_video(youtube, chat_id, url=None, query=None, auto_schedule_iso=None
         req = youtube.videos().insert(part='snippet,status', body=body, media_body=MediaFileUpload('video.mp4', chunksize=-1, resumable=True))
         vid_id = req.execute().get('id')
         
-        # Safe Thumbnail Upload Bypass (Prevents crashes on unverified channels)
         if thumb:
             try:
                 youtube.thumbnails().set(videoId=vid_id, media_body=MediaFileUpload(thumb)).execute()
